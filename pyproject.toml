@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dev-diagnosis-agent-lab"
+version = "0.0.0"
+description = "Learning scaffold for a development diagnosis agent and regression evaluation"
+requires-python = ">=3.11,<3.14"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "integration: integration tests added in later milestones",
+  "llm: tests requiring explicit model configuration and possibly API spend",
+]
