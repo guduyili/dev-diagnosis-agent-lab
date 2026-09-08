@@ -25,3 +25,32 @@
 处理：在 `project/rag_agent/nodes.py` 显式指定 `method="function_calling"`，将结构化 schema 放入工具定义；DeepSeek 的工具调用接口支持该方式。
 验证：源码检查确认运行时调用带有 `method="function_calling"`；通过 Python 编译检查和模块导入检查。
 经验：切换 OpenAI 兼容模型时，不要假设所有 provider 都支持同一种 `response_format`。先确认模型能力，再显式选择 LangChain 的结构化输出方法。
+
+## [ERR-20260908-001] 参考项目虚拟环境缺少依赖和 pip
+
+**Logged**: 2026-09-08
+**Priority**: medium
+**Status**: pending
+**Area**: infra
+
+### Summary
+为注释修改执行导入验证时，参考项目 `.venv` 无法导入 `langchain_text_splitters`，且解释器没有 `pip` 模块。
+
+### Error
+```text
+ModuleNotFoundError: No module named 'langchain_text_splitters'
+No module named pip
+```
+
+### Context
+- 操作：对 `project/` 执行 `compileall` 后导入核心模块。
+- 解释器：`references/upstream/agentic-rag-for-dummies/.venv/Scripts/python.exe`。
+- `compileall` 已通过；失败发生在需要第三方包的运行时导入阶段。
+- 未记录密钥或完整环境变量。
+
+### Suggested Fix
+按 `requirements.txt` 重新创建或修复参考项目虚拟环境，并使用已验证的 Python 安装工具安装依赖；完成后重新做核心模块导入和最小离线实验。不要把本次静态编译结果写成完整运行通过。
+
+### Metadata
+- Reproducible: yes
+- Related Files: `requirements.txt`, `docs/01-environment.md`
