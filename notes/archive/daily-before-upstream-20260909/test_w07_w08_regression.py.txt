@@ -1,0 +1,80 @@
+"""D19、D20、D22：报告分母、失败门禁与比较时的版本一致性。"""
+from copy import deepcopy
+
+import pytest
+from .support import field, target
+
+
+@pytest.mark.day(19)
+def test_summary_counts_every_outcome_with_explicit_denominators():
+    summarize = target("evals.reporting", "summarize")
+    rows = [{"case_id": str(i), "status": status} for i, status in enumerate(
+        ["passed", "failed", "error", "skipped", "not_run"]
+    )]
+    report = summarize(rows)
+    assert field(report, "total") == 5
+    for status in ("passed", "failed", "error", "skipped", "not_run"):
+        assert field(report, status) == 1
+    assert field(report, "completion_rate") == pytest.approx(2 / 5)
+    assert field(report, "success_rate_all") == pytest.approx(1 / 5)
+    assert field(report, "success_rate_judged") == pytest.approx(1 / 2)
+
+
+@pytest.mark.day(19)
+@pytest.mark.parametrize("rows", [[], [{"case_id": "1", "status": "unknown"}],
+                                 [{"case_id": "1", "status": "passed"}] * 2])
+def test_summary_rejects_empty_unknown_and_duplicate_records(rows):
+    summarize = target("evals.reporting", "summarize")
+    with pytest.raises(ValueError):
+        summarize(rows)
+
+
+@pytest.mark.day(19)
+def test_all_errors_have_no_valid_success_denominator():
+    summarize = target("evals.reporting", "summarize")
+    report = summarize([{"case_id": "1", "status": "error"}])
+    assert field(report, "success_rate_all") == 0
+    assert field(report, "completion_rate") == 0
+    assert field(report, "success_rate_judged") is None
+
+
+@pytest.mark.day(20)
+@pytest.mark.parametrize("status,allowed", [
+    ("passed", True), ("failed", False), ("error", False), ("skipped", False), ("not_run", False),
+])
+def test_strict_gate_accepts_only_completed_passing_cases(status, allowed):
+    gate = target("evals.reporting", "gate")
+    assert gate([{"case_id": "1", "status": status}]) is allowed
+
+
+@pytest.mark.day(20)
+def test_gate_rejects_empty_and_does_not_let_many_passes_hide_one_error():
+    gate = target("evals.reporting", "gate")
+    assert gate([]) is False
+    rows = [{"case_id": str(i), "status": "passed"} for i in range(10)]
+    rows.append({"case_id": "bad", "status": "error"})
+    assert gate(rows) is False
+
+
+@pytest.mark.day(22)
+def test_comparison_uses_case_ids_not_row_order_and_lists_regressions():
+    compare = target("evals.reporting", "compare_runs")
+    baseline = [{"case_id": "a", "status": "passed"}, {"case_id": "b", "status": "failed"}]
+    candidate = [{"case_id": "b", "status": "passed"}, {"case_id": "a", "status": "failed"}]
+    common = {"dataset_hash": "d1", "knowledge_hash": "k1"}
+    report = compare(baseline, candidate, baseline_meta=common, candidate_meta=deepcopy(common))
+    assert field(report, "improved") == ["b"]
+    assert field(report, "regressed") == ["a"]
+
+
+@pytest.mark.day(22)
+def test_comparison_rejects_different_datasets_and_case_sets():
+    compare = target("evals.reporting", "compare_runs")
+    rows = [{"case_id": "a", "status": "passed"}]
+    with pytest.raises(ValueError):
+        compare(rows, rows, baseline_meta={"dataset_hash": "d1", "knowledge_hash": "k1"},
+                candidate_meta={"dataset_hash": "d2", "knowledge_hash": "k1"})
+    meta = {"dataset_hash": "d1", "knowledge_hash": "k1"}
+    with pytest.raises(ValueError):
+        compare(rows, [{"case_id": "b", "status": "passed"}], baseline_meta=meta, candidate_meta=meta)
+

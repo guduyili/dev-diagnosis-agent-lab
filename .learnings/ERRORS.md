@@ -54,3 +54,44 @@ No module named pip
 ### Metadata
 - Reproducible: yes
 - Related Files: `requirements.txt`, `docs/01-environment.md`
+
+## [ERR-20260909-CMT] comment_review_paths
+
+**Logged**: 2026-09-09
+**Priority**: low
+**Status**: resolved
+**Area**: docs
+
+### Summary
+注释复核时混用了任务工作目录与 G 盘上游目录，读取 CSS 和协作约定失败；一次日志补丁也因锚点不匹配被拒绝。
+
+### Error
+`Get-Content: Cannot find path`；`apply_patch verification failed: Failed to find expected lines`。
+
+### Suggested Fix
+源码读取明确指定上游 workdir；跨项目读取使用绝对路径。补丁必须使用已读到的真实行作为锚点。
+
+### Resolution
+已从正确目录读取 CSS 和主项目 AGENTS.md，并使用已核对的日志尾部追加记录。失败读取和失败补丁未改变源码。
+
+另一次为减少换行提示而临时设置 `core.autocrlf=false`，导致现有 CRLF 被 diff 检查当成尾部空白。恢复仓库换行处理，并仅用 `core.safecrlf=false` 关闭转换提示后检查通过；未改动文件换行或放宽空白错误规则。
+
+### Metadata
+- Reproducible: yes
+- Related Files: `references/upstream/agentic-rag-for-dummies/project/ui/css.py`, `AGENTS.md`
+
+## [ERR-20260909-DAILY] daily_test_adaptation
+
+**Logged**: 2026-09-09
+**Priority**: medium
+**Status**: resolved
+**Area**: tests
+
+### Summary
+重写上游检验时发现 ToolNode 独立 invoke 缺运行时上下文，以及测试错误地期望首个 child 已包含 parent 才有的事实。
+
+### Resolution
+把 ToolNode 放进真实 StateGraph 执行；完整链路分别检查 child 的错误现象与 parent 回取后的修复方式，保留证据传递断言。59 项通过。
+
+### Other setup corrections
+初期猜测的 daily 文档路径不存在，改为读取实际的 10-implementation-workbook.md；补丁工具不支持同一补丁删除并新增相同路径，改为读取现有内容后 Update。依赖声明移除不存在的 pymupdf4llm[layout] extra，实际 pymupdf-layout 已由安装依赖提供。一次预判正则转义问题的补丁因行不存在被拒绝，复读确认原正则正确，未修改。

@@ -1,0 +1,103 @@
+"""按学习日选择测试；缺少实现直接失败，不用 skip/xfail 伪装通过。"""
+import socket
+
+import pytest
+
+MANUAL_DAYS = {
+    2: "追踪一条真实请求及三种分支",
+    3: "审核真实 incident 与来源",
+    15: "人工校准裁判及语义质量",
+    18: "实际使用与提效观察",
+    21: "真实业务代码的红→绿演练",
+    23: "演示和实验复盘",
+    24: "个人贡献与独立讲解",
+}
+
+
+def day_number(value):
+    import re
+    text = value.upper()
+    if re.fullmatch(r"W0?[1-8]-[ABC]", text):
+        return (int(text[1:text.index("-")]) - 1) * 3 + "ABC".index(text[-1]) + 1
+    if re.fullmatch(r"D?\d{1,2}", text):
+        number = int(text.removeprefix("D"))
+        if 1 <= number <= 24:
+            return number
+    raise pytest.UsageError("学习日使用 D01..D24 或 W01-A..W08-C。")
+
+
+def pytest_addoption(parser):
+    group = parser.getgroup("daily-learning")
+    group.addoption("--day", help="只运行一个学习日，例如 D06 或 W02-C")
+    group.addoption("--through-day", help="累计运行到某学习日，例如 D12")
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "day(number): 对应 8 周手册的第几个学习时段")
+    config._daily_failures = []
+    config._daily_manual = []
+
+
+def pytest_collection_modifyitems(config, items):
+    selected = config.getoption("--day")
+    through = config.getoption("--through-day")
+    if selected and through:
+        raise pytest.UsageError("--day 与 --through-day 只能选择一个。")
+    if not selected and not through:
+        config._daily_manual = list(MANUAL_DAYS)
+        return
+    limit = day_number(selected or through)
+    config._daily_manual = [number for number in MANUAL_DAYS if number <= limit] if through else []
+    if selected and limit in MANUAL_DAYS:
+        config._daily_manual = [limit]
+        raise pytest.UsageError(
+            f"D{limit:02} 为人工验收：{MANUAL_DAYS[limit]}。"
+            "请按 docs/11-daily-tests.md 登记证据；不能用自动通过替代。"
+        )
+    kept, dropped = [], []
+    for item in items:
+        marker = item.get_closest_marker("day")
+        number = marker.args[0] if marker else None
+        wanted = number is not None and (number == limit if selected else number <= limit)
+        (kept if wanted else dropped).append(item)
+    if not kept:
+        raise pytest.UsageError("未找到对应学习日测试；请指定 tests/daily 目录。")
+    items[:] = kept
+    config.hook.pytest_deselected(items=dropped)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    report = outcome.get_result()
+    if report.failed:
+        detail = str(report.longrepr)
+        category = next(
+            (tag for tag in ("NOT_IMPLEMENTED", "IMPORT_ERROR", "NETWORK_BLOCKED") if tag in detail),
+            "BEHAVIOR_OR_RUNTIME_FAILURE",
+        )
+        item.config._daily_failures.append((category, item.nodeid))
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    terminalreporter.write_sep("-", "Daily learning acceptance")
+    for category, nodeid in config._daily_failures:
+        terminalreporter.write_line(f"{category}: {nodeid}")
+    for number in config._daily_manual:
+        terminalreporter.write_line(f"MANUAL_NOT_CHECKED: D{number:02} {MANUAL_DAYS[number]}")
+    terminalreporter.write_line(
+        "通过只代表已选自动检查通过；人工验收、真实模型效果和未选择的学习日不计入完成。"
+    )
+
+
+@pytest.fixture(autouse=True)
+def offline_only(monkeypatch):
+    """阻断本测试进程的 Python TCP 连接；测试只使用临时资料与假模型。"""
+    def deny(*args, **kwargs):
+        pytest.fail("NETWORK_BLOCKED: 每日测试禁止联网，请通过依赖注入提供假模型/工具。")
+    monkeypatch.setattr(socket.socket, "connect", deny)
+    monkeypatch.setattr(socket.socket, "connect_ex", deny)
+    monkeypatch.setattr(socket, "create_connection", deny)
+    monkeypatch.setenv("LANGFUSE_ENABLED", "false")
+    monkeypatch.setenv("LANGSMITH_TRACING", "false")
+    monkeypatch.setenv("LANGCHAIN_TRACING_V2", "false")

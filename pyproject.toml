@@ -13,8 +13,20 @@ dependencies = []
 where = ["src"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests/daily", "tests/unit", "tests/integration"]
 markers = [
   "integration: integration tests added in later milestones",
   "llm: tests requiring explicit model configuration and possibly API spend",
+]
+
+[dependency-groups]
+dev = [
+    "langchain-huggingface==1.2.2",
+    "langchain-openai==1.6.0",
+    "langchain-qdrant==1.1.0",
+    "langchain-text-splitters>=1,<2",
+    "langgraph==1.2.11",
+    "pymupdf4llm==1.28.2",
+    "pytest>=8,<10",
+    "tiktoken==0.14.0",
 ]

@@ -1,0 +1,82 @@
+"""D13–D14：用例加载和适配；不创建裁判或计算在线分数。"""
+import json
+from copy import deepcopy
+
+import pytest
+from .support import example_case, field, target
+
+
+def write_cases(tmp_path, cases):
+    (tmp_path / "fixture.md").write_text("人工构造的格式测试资料。", encoding="utf-8")
+    path = tmp_path / "cases.jsonl"
+    path.write_text("".join(json.dumps(case, ensure_ascii=False) + "\n" for case in cases), encoding="utf-8")
+    return path
+
+
+@pytest.mark.day(13)
+def test_approved_case_is_loaded_without_mutation(tmp_path):
+    loader = target("evals.cases", "load_cases")
+    case = example_case()
+    assert loader(write_cases(tmp_path, [case]), source_root=tmp_path) == [case]
+
+
+@pytest.mark.day(13)
+@pytest.mark.parametrize("kind", ["empty", "duplicate", "unreviewed", "no_expected", "missing_source", "malformed"])
+def test_invalid_case_data_is_rejected(tmp_path, kind):
+    loader = target("evals.cases", "load_cases")
+    case = example_case()
+    cases = [case]
+    if kind == "empty":
+        cases = []
+    elif kind == "duplicate":
+        cases.append(deepcopy(case))
+    elif kind == "unreviewed":
+        case["review_status"] = "pending"
+    elif kind == "no_expected":
+        del case["expected"]
+    elif kind == "missing_source":
+        case["source_refs"] = ["does-not-exist.md"]
+    path = write_cases(tmp_path, cases)
+    if kind == "malformed":
+        path.write_text("{broken\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        loader(path, source_root=tmp_path)
+
+
+@pytest.mark.day(13)
+def test_case_families_cannot_cross_splits():
+    validate = target("evals.cases", "validate_splits")
+    with pytest.raises(ValueError):
+        validate({"dev": [example_case("a", "same")], "holdout": [example_case("b", "same")]})
+    validate({"dev": [example_case("a", "one")], "holdout": [example_case("b", "two")]})
+
+
+@pytest.mark.day(14)
+def test_adapter_never_sends_expected_to_agent_and_uses_real_result():
+    adapt = target("evals.adapter", "run_case")
+    case = example_case()
+    original = deepcopy(case)
+    seen = []
+    def diagnose(request):
+        seen.append(deepcopy(request))
+        return {"status": "answered", "answer": "actual answer",
+                "generation_contexts": ["actually retrieved"],
+                "tool_calls": [{"name": "search", "args": {"query": "x"}, "status": "succeeded", "output": "evidence"}]}
+    result = adapt(case, diagnose=diagnose)
+    assert seen == [case["input"]], "Agent 输入必须与人工参考和评分规则隔离"
+    assert case == original
+    assert field(result, "input") == case["input"]["question"]
+    assert field(result, "actual_output") == "actual answer"
+    assert field(result, "retrieval_context") == ["actually retrieved"]
+    assert field(result, "expected_output") == case["expected"]["summary"]
+    assert len(field(result, "tools_called")) == 1
+
+
+@pytest.mark.day(14)
+def test_adapter_does_not_score_a_failed_run_as_an_empty_answer():
+    adapt = target("evals.adapter", "run_case")
+    def broken(request):
+        raise RuntimeError("fixture infrastructure failure")
+    with pytest.raises(RuntimeError):
+        adapt(example_case(), diagnose=broken)
+

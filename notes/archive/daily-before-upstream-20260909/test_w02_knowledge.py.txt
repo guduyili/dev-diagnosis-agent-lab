@@ -1,0 +1,146 @@
+"""D04–D06：资料来源、加载和分块。所有输入只写入 tmp_path。"""
+import importlib
+from pathlib import Path
+
+import pytest
+from .support import field, target
+
+
+@pytest.mark.day(4)
+def test_document_retains_provenance():
+    document_type = target("diagnosis_agent.models", "Document")
+    data = dict(document_id="doc-1", project_id="demo", project_version="v1",
+                source_path="notes/error.md", content_hash="abc123", text="错误记录")
+    document = document_type(**data)
+    for key, value in data.items():
+        assert field(document, key) == value
+
+
+@pytest.mark.day(4)
+@pytest.mark.parametrize("missing", ["document_id", "project_version", "source_path"])
+def test_document_rejects_missing_provenance(missing):
+    document_type = target("diagnosis_agent.models", "Document")
+    data = dict(document_id="doc-1", project_id="demo", project_version="v1",
+                source_path="notes/error.md", content_hash="abc123", text="错误记录")
+    data[missing] = ""
+    with pytest.raises(ValueError):
+        document_type(**data)
+
+
+def load(path, root):
+    return target("diagnosis_agent.knowledge.loader", "load_document")(
+        path, root=root, project_id="demo", project_version="v1"
+    )
+
+
+@pytest.mark.day(5)
+@pytest.mark.parametrize("extension", [".md", ".txt"])
+def test_loader_reads_unicode_and_keeps_source(tmp_path, extension):
+    path = tmp_path / ("故障" + extension)
+    text = "# 上传失败\n\nValueError: 字段缺失\n"
+    path.write_text(text, encoding="utf-8")
+    doc = load(path, tmp_path)
+    assert field(doc, "text") == text
+    assert Path(field(doc, "source_path")).name == path.name
+    assert field(doc, "project_version") == "v1"
+    assert field(doc, "content_hash")
+
+
+@pytest.mark.day(5)
+def test_loader_distinguishes_same_name_and_content_revision(tmp_path):
+    left, right = tmp_path / "a", tmp_path / "b"
+    left.mkdir()
+    right.mkdir()
+    a, b = left / "error.md", right / "error.md"
+    a.write_text("old", encoding="utf-8")
+    b.write_text("old", encoding="utf-8")
+    old = load(a, tmp_path)
+    assert field(old, "document_id") != field(load(b, tmp_path), "document_id")
+    assert field(old, "document_id") == field(load(a, tmp_path), "document_id")
+    a.write_text("new", encoding="utf-8")
+    new = load(a, tmp_path)
+    assert field(old, "document_id") == field(new, "document_id")
+    assert field(old, "content_hash") != field(new, "content_hash")
+
+
+@pytest.mark.day(5)
+def test_loader_rejects_missing_and_blank_documents(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        load(tmp_path / "absent.md", tmp_path)
+    blank = tmp_path / "blank.md"
+    blank.write_text(" \n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        load(blank, tmp_path)
+
+
+@pytest.fixture
+def chunker(monkeypatch):
+    # 首先按正常包路径导入。若源码仍写 import config，这里会明确暴露问题。
+    cls = target("diagnosis_agent.document_chunker", "DocumentChunker")
+    config = importlib.import_module("diagnosis_agent.config")
+    for key, value in {
+        "MIN_PARENT_SIZE": 80, "MAX_PARENT_SIZE": 220,
+        "CHILD_CHUNK_SIZE": 65, "CHILD_CHUNK_OVERLAP": 10,
+    }.items():
+        monkeypatch.setattr(config, key, value)
+    return cls()
+
+
+@pytest.mark.day(6)
+def test_chunks_keep_important_text_and_parent_links(chunker, tmp_path):
+    path = tmp_path / "incident.md"
+    lines = ["# 故障排查", "FIRST_EVIDENCE", "ERROR_400"] + [
+        f"检查项{i:02} 配置与日志需要对应版本。" for i in range(50)
+    ] + ["LAST_EVIDENCE"]
+    path.write_text("\n\n".join(lines), encoding="utf-8")
+    parents, children = chunker.create_chunks_single(path, source_name=path.name)
+    assert parents and children
+    parent_map = dict(parents)
+    assert len(parent_map) == len(parents), "parent_id 重复"
+    for parent_id, parent in parents:
+        assert len(parent.page_content) <= 220
+        assert parent.metadata["source"] == path.name
+        assert parent.metadata["parent_id"] == parent_id
+    for child in children:
+        assert child.metadata["parent_id"] in parent_map
+        assert child.metadata["source"] == path.name
+        assert child.page_content.strip()
+        assert len(child.page_content) <= 65
+    # 检查全部带编号内容，能抓住仅保留第一个或最后一个块的实现错误。
+    full = "\n".join(parent.page_content for _, parent in parents)
+    child_text = "\n".join(child.page_content for child in children)
+    for token in ["FIRST_EVIDENCE", "ERROR_400", "LAST_EVIDENCE"] + [f"检查项{i:02}" for i in range(50)]:
+        assert token in full
+        assert token in child_text
+
+
+@pytest.mark.day(6)
+def test_directory_includes_every_file_and_returns_results(chunker, tmp_path):
+    for name in ("first", "second"):
+        (tmp_path / f"{name}.md").write_text(f"# {name}\n{name}_evidence", encoding="utf-8")
+    parents, children = chunker.create_chunks(tmp_path)
+    assert parents and children
+    text = "\n".join(parent.page_content for _, parent in parents)
+    assert "first_evidence" in text and "second_evidence" in text
+    again = chunker.create_chunks(tmp_path)
+    assert [key for key, _ in parents] == [key for key, _ in again[0]]
+
+
+@pytest.mark.day(6)
+def test_empty_directory_has_no_results(chunker, tmp_path):
+    assert chunker.create_chunks(tmp_path) == ([], [])
+
+
+@pytest.mark.day(6)
+def test_missing_file_is_not_silent_success(chunker, tmp_path):
+    with pytest.raises(FileNotFoundError):
+        chunker.create_chunks_single(tmp_path / "missing.md")
+
+
+@pytest.mark.day(6)
+def test_invalid_overlap_fails_at_construction(monkeypatch):
+    cls = target("diagnosis_agent.document_chunker", "DocumentChunker")
+    config = importlib.import_module("diagnosis_agent.config")
+    monkeypatch.setattr(config, "CHILD_CHUNK_OVERLAP", config.CHILD_CHUNK_SIZE)
+    with pytest.raises(ValueError):
+        cls()

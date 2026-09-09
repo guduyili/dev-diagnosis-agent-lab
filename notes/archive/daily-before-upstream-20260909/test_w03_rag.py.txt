@@ -1,0 +1,112 @@
+"""D07–D09：本地索引、检索与普通 RAG；不下载 embedding 或调用在线模型。"""
+from copy import deepcopy
+
+import pytest
+from .support import TinyEmbeddings, RecordingRetriever, RecordingLLM, chunk, field, target
+
+
+@pytest.fixture
+def index(tmp_path):
+    factory = target("diagnosis_agent.retrieval.index", "create_index")
+    instance = factory(tmp_path / "index", embedder=TinyEmbeddings(), embedding_id="tiny-v1")
+    yield instance
+    instance.close()
+
+
+@pytest.mark.day(7)
+def test_index_upsert_is_idempotent_and_replaces_revision(index):
+    doc = chunk()
+    index.upsert([doc, deepcopy(doc)])
+    results = index.search("upload", k=10, project_id="demo", project_version="v1")
+    assert [field(item, "chunk_id") for item in results] == ["c1"]
+    index.upsert([chunk(text="upload revised")])
+    results = index.search("upload", k=10, project_id="demo", project_version="v1")
+    assert len(results) == 1
+    assert field(results[0], "text") == "upload revised"
+
+
+@pytest.mark.day(7)
+def test_index_persists_and_rejects_incompatible_embedding(tmp_path):
+    factory = target("diagnosis_agent.retrieval.index", "create_index")
+    location = tmp_path / "index"
+    first = factory(location, embedder=TinyEmbeddings(), embedding_id="tiny-v1")
+    try:
+        first.upsert([chunk()])
+    finally:
+        first.close()
+    second = factory(location, embedder=TinyEmbeddings(), embedding_id="tiny-v1")
+    try:
+        assert field(second.search("upload", k=1, project_id="demo", project_version="v1")[0], "chunk_id") == "c1"
+    finally:
+        second.close()
+    # 即使向量维度相同，embedding 标识不同也不能悄悄混用。
+    with pytest.raises(ValueError):
+        factory(location, embedder=TinyEmbeddings(), embedding_id="tiny-v2")
+
+
+@pytest.mark.day(8)
+def test_search_filters_project_version_before_top_k(index):
+    index.upsert([
+        chunk("wrong-project", project="other", text="upload"),
+        chunk("wrong-version", version="v2", text="upload"),
+        chunk("right", text="upload error"),
+        chunk("less-relevant", text="login login"),
+    ])
+    results = index.search("upload", k=1, project_id="demo", project_version="v1")
+    assert len(results) == 1
+    assert field(results[0], "chunk_id") == "right"
+    assert index.search("upload", k=5, project_id="absent", project_version="v1") == []
+
+
+@pytest.mark.day(8)
+def test_search_rejects_invalid_k(index):
+    with pytest.raises(ValueError):
+        index.search("upload", k=0, project_id="demo", project_version="v1")
+
+
+@pytest.mark.day(9)
+def test_baseline_calls_dependencies_once_and_preserves_evidence():
+    diagnose = target("diagnosis_agent.baseline", "diagnose")
+    evidence = [chunk()]
+    retriever, llm = RecordingRetriever(evidence), RecordingLLM()
+    request = {"question": "upload", "project_id": "demo", "project_version": "v1", "session_id": "s1"}
+    original = deepcopy(request)
+    result = diagnose(request, retriever=retriever, llm=llm)
+    assert request == original, "入口不应修改调用者的 request"
+    assert len(retriever.calls) == len(llm.calls) == 1
+    assert retriever.calls[0][1]["project_id"] == "demo"
+    assert retriever.calls[0][1]["project_version"] == "v1"
+    assert llm.calls[0][1] == [item["text"] for item in evidence]
+    assert field(result, "answer") == llm.answer
+    assert field(result, "status") == "answered"
+    assert field(field(result, "evidence")[0], "chunk_id") == "c1"
+
+
+@pytest.mark.day(9)
+def test_baseline_with_no_evidence_does_not_fabricate_an_answer():
+    diagnose = target("diagnosis_agent.baseline", "diagnose")
+    llm = RecordingLLM()
+    result = diagnose(
+        {"question": "unknown", "project_id": "demo", "project_version": "v1", "session_id": "s1"},
+        retriever=RecordingRetriever([]), llm=llm,
+    )
+    assert field(result, "status") == "insufficient_evidence"
+    assert field(result, "evidence") == []
+    assert not llm.calls, "本练习约定空证据直接返回不足，不调用生成器猜测"
+
+
+@pytest.mark.day(9)
+def test_baseline_exposes_retrieval_failure():
+    diagnose = target("diagnosis_agent.baseline", "diagnose")
+    class BrokenRetriever:
+        def search(self, *args, **kwargs):
+            raise RuntimeError("fixture: index unavailable")
+    llm = RecordingLLM()
+    result = diagnose(
+        {"question": "upload", "project_id": "demo", "project_version": "v1", "session_id": "s1"},
+        retriever=BrokenRetriever(), llm=llm,
+    )
+    assert field(result, "status") == "tool_error"
+    assert field(result, "stop_reason")
+    assert not llm.calls
+

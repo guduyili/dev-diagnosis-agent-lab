@@ -1,0 +1,80 @@
+"""测试支撑：加载真实业务入口，提供有明确行为的外部依赖替身。"""
+from copy import deepcopy
+import importlib
+from collections.abc import Mapping
+
+import pytest
+
+
+def target(module_name, symbol):
+    """只导入主项目；绝不回退到上游实现或在测试里补齐业务算法。"""
+    try:
+        module = importlib.import_module(module_name)
+    except ModuleNotFoundError as exc:
+        absent = exc.name or ""
+        if absent == module_name or module_name.startswith(absent + "."):
+            pytest.fail(f"NOT_IMPLEMENTED: 请实现 {module_name}.{symbol}", pytrace=False)
+        pytest.fail(
+            f"IMPORT_ERROR: {module_name} 导入失败，缺少 {absent!r}；"
+            "检查包内相对导入与依赖。测试不会替你注入同名模块。",
+            pytrace=False,
+        )
+    if not hasattr(module, symbol):
+        pytest.fail(f"NOT_IMPLEMENTED: 请实现 {module_name}.{symbol}", pytrace=False)
+    return getattr(module, symbol)
+
+
+def field(value, name):
+    """允许 dict、dataclass 或 Pydantic 对象，字段语义保持一致。"""
+    return value[name] if isinstance(value, Mapping) else getattr(value, name)
+
+
+def example_case(case_id="case-1", family="family-1"):
+    """明确为人工构造夹具，不能冒充真实事故进入正式数据集。"""
+    return {
+        "id": case_id, "family_id": family, "origin": "constructed",
+        "review_status": "approved", "category": "knowledge",
+        "input": {"question": "测试报告中哪个用例失败？", "project_version": "v1"},
+        "expected": {"status": "answered", "summary": "test_upload 失败", "source_ids": ["doc-1"]},
+        "source_refs": ["fixture.md"],
+    }
+
+
+def chunk(chunk_id="c1", project="demo", version="v1", text="upload error"):
+    return {
+        "chunk_id": chunk_id, "document_id": f"doc-{chunk_id}",
+        "project_id": project, "project_version": version,
+        "source_path": f"{chunk_id}.md", "text": text,
+    }
+
+
+class TinyEmbeddings:
+    """固定的本地向量函数。只代替 embedding 服务，不实现索引或检索。"""
+    def embed_documents(self, texts):
+        return [self.embed_query(text) for text in texts]
+
+    def embed_query(self, text):
+        lower = text.lower()
+        return [float(lower.count(word)) for word in ("upload", "error", "login")] + [0.1]
+
+
+class RecordingRetriever:
+    def __init__(self, results):
+        self.results = results
+        self.calls = []
+
+    def search(self, query, **kwargs):
+        self.calls.append((query, deepcopy(kwargs)))
+        return deepcopy(self.results)
+
+
+class RecordingLLM:
+    """记录真正传入的上下文；不替被测模块实现路由或证据拼装。"""
+    def __init__(self, answer="请先检查上传配置。"):
+        self.answer = answer
+        self.calls = []
+
+    def generate(self, question, contexts):
+        self.calls.append((question, deepcopy(contexts)))
+        return self.answer
+

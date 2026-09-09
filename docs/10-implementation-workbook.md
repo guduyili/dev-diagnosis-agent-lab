@@ -2,6 +2,8 @@
 
 更新日期：2026-09-08。适用对象：具备基本 RAG / Agent 概念、希望从事大模型应用、Agent 评测或测试开发的在校生。
 
+2026-09-09 更新：[每日任务验收测试](11-daily-tests.md) 已按用户要求改为直接调用上游 project 的 59 项离线检查，提供学习日命令与人工验收清单。以下“拟建”模块仍是个人实现计划，不作为不存在接口的每日必过条件；上游测试通过不代表个人项目实现完成。当前映射与验证范围以新指南为准。
+
 本手册展开 [上游源码阅读与迁移](02-upstream-reading.md)，与 [8 周路线](03-roadmap.md)、[设计约定](04-project-design.md)、[评测规范](05-evaluation.md) 配套使用。各阶段按验收推进；每周 8–12 小时只是估计，基础补课和环境阻塞需要额外时间。
 
 **本次新增的是实施路线和学习练习。下文标为“拟建”的代码、测试、报告尚未实现，不代表已完成的成果。**
@@ -441,4 +443,3 @@ Get-Content .\references\upstream\agentic-rag-for-dummies\project\config.py
 - 回归执行入口：[DeepEval CI](https://deepeval.com/docs/evaluation-unit-testing-in-ci-cd)。
 
 在线文档核查日期：2026-09-08（Graph API、Test Cases、Faithfulness）。CI 入口沿用项目既有评测指南，正式实施时再按安装版本核对。每月按 [维护指南](06-maintenance.md) 查看变更，当前实验期间固定依赖和知识版本。
-

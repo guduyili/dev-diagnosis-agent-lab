@@ -20,3 +20,39 @@
 - Source: conversation
 - Related Files: README.md, docs/09-progress.md, data/cases/README.md
 - Promoted: AGENTS.md
+
+## [LRN-20260909-CMT] correction
+
+**Logged**: 2026-09-09
+**Priority**: medium
+**Status**: resolved
+**Area**: docs
+
+### Summary
+Agent 学习注释要区分提示词要求、图的硬约束、实际工具结果和 UI 展示。
+
+### Details
+本次修正了首步检索被强制执行、检索 key 代表成功、共享 Gradio 实例自动隔离用户、文件导入完全回滚等过度表述。补充 reducer 合并示例、计数边界、父子块 ID、结构化输出及评测上下文的实际来源。函数装饰为工具后，其 docstring 可能成为模型输入，不能当成普通学习注释任意扩写。
+
+### Validation
+使用修改前快照比较剔除普通文档字符串后的可执行 AST，并额外逐字比较工具和 QueryAnalysis 的模型可见 docstring；不通过导入应用初始化模型来验证纯注释修改。
+
+### Metadata
+- Source: conversation
+- Related Files: `references/upstream/agentic-rag-for-dummies/project/rag_agent/nodes.py`, `references/upstream/agentic-rag-for-dummies/project/rag_agent/tools.py`
+
+## [LRN-20260909-DAILY] correction
+
+**Logged**: 2026-09-09
+**Priority**: high
+**Status**: resolved
+**Area**: tests
+
+### Summary
+用户要求学习检验直接调用已有 Agent 项目；不能将尚不存在的规划接口作为当前必过契约。
+
+### Details
+重写 daily 后，真实导入上游模块并执行实际 LangGraph/Qdrant；仅在外部模型边界提供响应或向量。将未实现的评测、报告解析功能列为扩展。旧测试备份，学习者源码保留。使用测试夹具需注明来源与替换范围，不能把固定响应检验写成真实模型质量。
+
+### Validation
+59 项真实上游离线行为检查通过；人工日单列。详见 docs/11-daily-tests.md。

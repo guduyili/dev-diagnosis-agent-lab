@@ -1,0 +1,79 @@
+"""D16–D17：已有 JUnit XML 报告的解析和工具包装。不会执行 pytest 子进程。"""
+import pytest
+from .support import field, target
+
+REPORT = """<testsuites><testsuite name="api">
+<testcase classname="tests.upload" name="test_ok" time="0.1"/>
+<testcase classname="tests.upload" name="test_same" time="0.2"><failure message="bad status">assert 500 == 200</failure></testcase>
+<testcase classname="tests.login" name="test_same" time="0.3"><error message="fixture crashed">RuntimeError</error></testcase>
+<testcase classname="tests.login" name="test_skip"><skipped message="unsupported"/></testcase>
+</testsuite></testsuites>"""
+
+
+@pytest.mark.day(16)
+def test_junit_keeps_failures_errors_skips_and_duplicate_names(tmp_path):
+    parse = target("diagnosis_agent.tools.junit_report", "parse_junit")
+    path = tmp_path / "report.xml"
+    path.write_text(REPORT, encoding="utf-8")
+    result = parse(path)
+    cases = field(result, "cases")
+    assert len(cases) == 4
+    assert [field(case, "status") for case in cases] == ["passed", "failed", "error", "skipped"]
+    assert len({field(case, "id") for case in cases}) == 4
+    assert "assert 500 == 200" in field(cases[1], "message")
+    assert field(cases[1], "duration") == pytest.approx(0.2)
+
+
+@pytest.mark.day(16)
+def test_junit_supports_single_suite_root(tmp_path):
+    parse = target("diagnosis_agent.tools.junit_report", "parse_junit")
+    path = tmp_path / "single.xml"
+    path.write_text('<testsuite><testcase name="test_ok"/></testsuite>', encoding="utf-8")
+    assert len(field(parse(path), "cases")) == 1
+
+
+@pytest.mark.day(16)
+@pytest.mark.parametrize("text", ["<broken", "<testsuite/>", "<something/>"])
+def test_bad_or_empty_junit_is_not_a_passing_report(tmp_path, text):
+    parse = target("diagnosis_agent.tools.junit_report", "parse_junit")
+    path = tmp_path / "bad.xml"
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError):
+        parse(path)
+
+
+@pytest.mark.day(16)
+def test_missing_junit_raises_file_error(tmp_path):
+    parse = target("diagnosis_agent.tools.junit_report", "parse_junit")
+    with pytest.raises(FileNotFoundError):
+        parse(tmp_path / "absent.xml")
+
+
+@pytest.mark.day(17)
+def test_report_tool_returns_actual_parsed_data_and_provenance(tmp_path):
+    read_report = target("diagnosis_agent.tools.junit_report", "read_report_tool")
+    path = tmp_path / "report.xml"
+    path.write_text(REPORT, encoding="utf-8")
+    result = read_report(path, allowed_root=tmp_path)
+    assert field(result, "status") == "ok"
+    assert len(field(field(result, "data"), "cases")) == 4
+    assert field(result, "executed_tests") is False
+    assert str(field(result, "source_path")).endswith("report.xml")
+
+
+@pytest.mark.day(17)
+def test_report_tool_blocks_outside_root_and_reports_parse_error(tmp_path):
+    read_report = target("diagnosis_agent.tools.junit_report", "read_report_tool")
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    outside = tmp_path / "outside.xml"
+    outside.write_text(REPORT, encoding="utf-8")
+    denied = read_report(outside, allowed_root=selected)
+    assert field(denied, "status") == "error"
+    assert field(denied, "error_code") == "PATH_OUTSIDE_ROOT"
+    broken = selected / "bad.xml"
+    broken.write_text("<broken", encoding="utf-8")
+    result = read_report(broken, allowed_root=selected)
+    assert field(result, "status") == "error"
+    assert field(result, "error_code") == "INVALID_REPORT"
+

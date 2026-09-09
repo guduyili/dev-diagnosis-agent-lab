@@ -1,0 +1,34 @@
+"""D01：启动前的配置与语法检查，不代表模型或检索已经运行成功。"""
+import ast
+from pathlib import Path
+
+import pytest
+from .support import target
+
+pytestmark = pytest.mark.day(1)
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_python_sources_have_valid_syntax():
+    files = sorted((ROOT / "src/diagnosis_agent").rglob("*.py"))
+    assert files, "没有找到主项目 Python 源码"
+    for path in files:
+        ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
+
+
+def test_chunk_size_and_overlap_are_coherent():
+    config = "diagnosis_agent.config"
+    child = target(config, "CHILD_CHUNK_SIZE")
+    overlap = target(config, "CHILD_CHUNK_OVERLAP")
+    minimum = target(config, "MIN_PARENT_SIZE")
+    maximum = target(config, "MAX_PARENT_SIZE")
+    assert 0 <= overlap < child
+    assert 0 < minimum <= maximum
+    assert overlap < maximum
+
+
+def test_retrieval_and_loop_limits_are_positive():
+    for name in ("DEFAULT_RETRIEVAL_K", "MAX_TOOL_CALLS", "MAX_ITERATIONS"):
+        value = target("diagnosis_agent.config", name)
+        assert isinstance(value, int) and value > 0, name
+

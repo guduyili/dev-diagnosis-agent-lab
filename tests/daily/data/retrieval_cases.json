@@ -1,0 +1,5 @@
+[
+  {"id": "response-format", "query": "response_format", "expected_source": "deepseek.md", "expected_text": "function_calling"},
+  {"id": "parent-link", "query": "parent_id", "expected_source": "parents.md", "expected_text": "page_content"},
+  {"id": "checkpoint", "query": "thread_id", "expected_source": "sessions.md", "expected_text": "InMemorySaver"}
+]

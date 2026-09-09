@@ -1,0 +1,114 @@
+"""D10–D12：状态合并、预算边界和同一服务实例中的会话隔离。"""
+from copy import deepcopy
+
+import pytest
+from .support import RecordingLLM, RecordingRetriever, chunk, field, target
+
+
+@pytest.mark.day(10)
+def test_state_update_adds_deltas_and_retains_original():
+    apply_update = target("diagnosis_agent.agent.state", "apply_update")
+    previous = {"tool_call_count": 2, "iteration_count": 3, "pending_query": "upload", "retrieved_contexts": ["a"]}
+    original = deepcopy(previous)
+    result = apply_update(previous, {"tool_call_count": 1, "iteration_count": 1, "retrieved_contexts": ["a", "b"]})
+    assert result["tool_call_count"] == 3
+    assert result["iteration_count"] == 4
+    assert result["pending_query"] == "upload"
+    assert result["retrieved_contexts"] == ["a", "b"]
+    assert previous == original
+
+
+@pytest.mark.day(10)
+@pytest.mark.parametrize("clear,questions,expected", [
+    (True, ["upload"], "retrieve"), (False, [], "clarify"), (True, [], "clarify"),
+])
+def test_query_route_requires_both_clarity_and_questions(clear, questions, expected):
+    route = target("diagnosis_agent.agent.nodes", "route_query")
+    assert route({"is_clear": clear, "questions": questions}) == expected
+
+
+@pytest.mark.day(11)
+def test_tool_budget_rejects_whole_batch_before_any_execution():
+    execute = target("diagnosis_agent.tools.executor", "execute_tools")
+    seen = []
+    def search(query):
+        seen.append(query)
+        return query
+    calls = [{"name": "search", "args": {"query": str(i)}} for i in range(2)]
+    result = execute(calls, registry={"search": search}, remaining=1)
+    assert field(result, "status") == "budget_exceeded"
+    assert field(result, "executed") == 0
+    assert seen == []
+
+
+@pytest.mark.day(11)
+def test_tool_execution_distinguishes_proposed_executed_and_succeeded():
+    execute = target("diagnosis_agent.tools.executor", "execute_tools")
+    def broken(query):
+        raise RuntimeError("fixture error")
+    result = execute(
+        [{"name": "search", "args": {"query": "upload"}}],
+        registry={"search": broken}, remaining=1,
+    )
+    assert field(result, "status") == "tool_error"
+    assert field(result, "proposed") == 1
+    assert field(result, "executed") == 1
+    assert field(result, "succeeded") == 0
+    assert field(field(result, "tool_calls")[0], "error_code")
+
+
+@pytest.mark.day(11)
+def test_tool_success_uses_actual_output_and_arguments():
+    execute = target("diagnosis_agent.tools.executor", "execute_tools")
+    seen = []
+    def search(query):
+        seen.append(query)
+        return {"evidence": "actual tool output"}
+    result = execute([{"name": "search", "args": {"query": "upload"}}],
+                     registry={"search": search}, remaining=1)
+    assert seen == ["upload"]
+    assert field(result, "status") == "ok"
+    assert field(result, "executed") == field(result, "succeeded") == 1
+    assert field(field(result, "tool_calls")[0], "output") == {"evidence": "actual tool output"}
+
+
+@pytest.mark.day(11)
+def test_unknown_tool_is_explicit_error():
+    execute = target("diagnosis_agent.tools.executor", "execute_tools")
+    result = execute([{"name": "unknown", "args": {}}], registry={}, remaining=1)
+    assert field(result, "status") == "tool_error"
+    assert field(result, "executed") == 0
+
+
+class ClarifyingLLM(RecordingLLM):
+    """只判断输入中是否有缺失信息，业务代码仍负责存储/合并会话。"""
+    def __init__(self):
+        super().__init__()
+        self.analyses = []
+
+    def analyze(self, question):
+        self.analyses.append(question)
+        clear = "v1" in question or "login" in question
+        return {"is_clear": clear, "questions": [question] if clear else [],
+                "clarification_needed": "" if clear else "请补充项目版本"}
+
+
+@pytest.mark.day(12)
+def test_clarification_resumes_and_two_sessions_do_not_leak():
+    factory = target("diagnosis_agent.service", "create_service")
+    llm, retriever = ClarifyingLLM(), RecordingRetriever([chunk()])
+    service = factory(llm=llm, retriever=retriever)
+    def request(session, question):
+        return {"session_id": session, "question": question, "project_id": "demo", "project_version": ""}
+    first = service.diagnose(request("A", "upload"))
+    assert field(first, "status") == "needs_clarification"
+    assert not retriever.calls, "澄清前不应发起检索"
+    second = service.diagnose(request("B", "login"))
+    assert field(second, "status") == "answered"
+    assert "upload" not in llm.analyses[-1]
+    resumed = service.diagnose(request("A", "v1"))
+    assert field(resumed, "status") == "answered"
+    assert "upload" in llm.analyses[-1] and "v1" in llm.analyses[-1]
+    service.diagnose(request("A", "login"))
+    assert "upload" not in llm.analyses[-1], "完成后的 pending_query 应清除"
+
