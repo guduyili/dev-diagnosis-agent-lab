@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "diagnosis_agent"
+version = "0.0.0"
+description = "Learning scaffold for a development diagnosis agent and regression evaluation"
+requires-python = ">=3.11,<3.14"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["diagnosis_agent*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/daily", "tests/unit", "tests/integration"]
+markers = [
+  "integration: integration tests added in later milestones",
+  "llm: tests requiring explicit model configuration and possibly API spend",
+]
+
+[dependency-groups]
+dev = [
+    "langchain-huggingface==1.2.2",
+    "langchain-openai==1.6.0",
+    "langchain-qdrant==1.1.0",
+    "langchain-text-splitters>=1,<2",
+    "langgraph==1.2.11",
+    "pymupdf4llm==1.28.2",
+    "pytest>=8,<10",
+    "tiktoken==0.14.0",
+]
+
+
+[tool.hatch.build.targets.wheel]
+packages = ["diagnosis_agent"]

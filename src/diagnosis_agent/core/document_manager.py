@@ -48,3 +48,54 @@ class DocumentManager:
             # 回调位于 try 外；回调自身失败时不会进入下方的文件导入异常处理。
 
             if progress_callback:
+                progress_callback((i + 1) / len(document_paths), f"Processing {Path(doc_path).name}")
+
+            # 每个文件的处理顺序是：复制/转换 → parent/child 分块 → 保存 parent → 写入 child
+            source_path = Path(doc_path)
+            doc_name = source_path.stem
+            md_path = self.markdown_dir / f"{doc_name}.md"
+            
+            # 只凭目标 Markdown 存在就跳过，不比较内容哈希，也不核对索引完整性。
+            # a.pdf 和 a.md、不同目录的 a.md 都映射到同一个 a.md。
+            # UI 的 Clear All 会清空整个知识库，并不是刷新单个文件的接口。
+            if md_path.exists():
+                skipped += 1
+                continue
+
+            # 每个文件重新初始化，失败清理不应删除前面成功导入的其他文件
+            parent_ids = []
+            try:
+                if source_path.suffix.lower() == ".md":
+                    shutil.copy(source_path, md_path)
+
+                else:
+                    # PDF 转 Markdown 时会丢弃图片，避免后续检索路径复杂化。
+                    pdfs_to_markdowns(str(source_path), overwrite=False)
+                parent_chunks,child_chunks = self.rag_system.chunker.create_chunks_single(
+                    md_path,
+                    source_path=source_path.name,
+                )
+                if not child_chunks:
+                    raise ValueError("No child chunks were created.")
+
+                parent_id = [parent_id for parent_id, _ in parent_chunks]
+                collection = self.rag_system.vector_db_manager.get_collection(self.rag_system.collection_name)
+                # 此调用同时计算 child 向量写入库, 不是仅把文本登记到待处理队列
+                collection.add_documents(child_chunks)
+
+                added += 1 
+
+            except Exception as e:
+                # 补偿清理，不是事务回滚 没有清理可能已部分写入的child向量
+                # delete_many/unlink 若再次抛错 会向外传播， 后面的文件也不会继续
+                self.rag_system.parent_store.delete_many(parent_id)
+                if md_path.exists():
+                    md_path.unlink()
+                print(f"Error processing {doc_path}: {e}")
+                skipped += 1
+                
+        # skipped 混合了“同名已存在”和“处理失败”，不能直接用它衡量导入质量。
+        return added, skipped
+            
+
+            

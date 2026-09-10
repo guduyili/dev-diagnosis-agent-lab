@@ -58,3 +58,11 @@
 - 旧 daily 和指南保存在 notes/archive/daily-before-upstream-20260909/；保留主项目练习代码及上游业务代码，由学习者按进度修改。
 - 原手册中的 JUnit 解析器、评测 adapter、统计和 CI 仍是未来个人扩展，不宣称上游已实现。
 - 下一步：按 docs/11-daily-tests.md 运行当天用例，先解释输入输出，再新增自己的数据或反例；修改业务实现后累计回归。
+
+## 2026-09-10 改为可独立阅读的每日模块实验
+
+- 根据学习者反馈，将周文件改为 18 个 test_dXX 文件，保留 59 项行为检查。每个文件直接展示 import、数据、真实组件创建、调用和断言。
+- 删除运行中的 support.py、共享数据文件及旧 test_wXX 文件；conftest 只保留导入路径、日期选择与离线保护。旧文件可从 notes/archive/daily-fixtures-20260910/ 恢复。
+- 分块、存储、工具与真实图的调用过程在当天函数中展开；模型响应和固定 embedding 也在使用它们的文件中可见。
+- 全量实测 59 passed，报告 reports/raw/daily-direct-20260910.xml；人工与在线模型验证仍单列。本次没有改上游业务实现或学习者 src 代码。
+- 下一步：先打开 tests/daily/test_d05_chunking.py，在输入数据处增加自己的小文档，再独立解释断言与实际结果。

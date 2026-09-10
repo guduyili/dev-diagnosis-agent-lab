@@ -56,3 +56,19 @@ Agent 学习注释要区分提示词要求、图的硬约束、实际工具结�
 
 ### Validation
 59 项真实上游离线行为检查通过；人工日单列。详见 docs/11-daily-tests.md。
+
+## [LRN-20260910-DAILY] correction
+
+**Logged**: 2026-09-10
+**Priority**: high
+**Status**: resolved
+**Area**: tests
+
+### Summary
+初学者要能在当天文件看到完整实验；真实调用上游代码仍不足以保证学习可读性。
+
+### Details
+用户指出多层 fixture、support 和外部数据让理解测试需要跨文件追踪。按天展开准备数据、构造真实对象、调用和断言，仅保留少量公共路径/离线设置。模型边界用本地可见的 Mock，固定 embedding 类在当天文件完整列出，接受适量重复代码。
+
+### Validation
+保留 59 项检查并实际通过；旧版完整备份。学习用代码组织优先考虑可观察的调用过程，不应优先消除所有重复。

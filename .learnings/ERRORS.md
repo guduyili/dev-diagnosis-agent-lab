@@ -95,3 +95,16 @@ No module named pip
 
 ### Other setup corrections
 初期猜测的 daily 文档路径不存在，改为读取实际的 10-implementation-workbook.md；补丁工具不支持同一补丁删除并新增相同路径，改为读取现有内容后 Update。依赖声明移除不存在的 pymupdf4llm[layout] extra，实际 pymupdf-layout 已由安装依赖提供。一次预判正则转义问题的补丁因行不存在被拒绝，复读确认原正则正确，未修改。
+
+## [ERR-20260910-DAILY] test_file_rewrite_commands
+
+**Logged**: 2026-09-10
+**Priority**: low
+**Status**: resolved
+**Area**: tests
+
+### Summary
+生成测试补丁的 JavaScript 模板中未转义代码围栏反引号，导致脚本解析失败；一次 rg 文件参数也未适配 PowerShell 的通配符行为。
+
+### Resolution
+补丁通过普通字符串或安全转义传入，最终测试源码显示正常 Markdown 围栏；搜索改用 rg 的 -g 'test_d*.py' 过滤。失败工具调用未写入源文件。重写后的 59 项测试通过。

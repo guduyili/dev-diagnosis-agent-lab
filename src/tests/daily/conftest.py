@@ -9,7 +9,8 @@ import sys
 
 import pytest
 
-PROJECT = Path(__file__).resolve().parents[2] / "references/upstream/agentic-rag-for-dummies/project"
+PROJECT = Path(__file__).resolve().parents[2] / "diagnosis_agent"
+# print(PROJECT)
 if not PROJECT.is_dir():
     raise pytest.UsageError(f"找不到上游源码：{PROJECT}")
 # 让当天文件能直接写 from document_chunker import DocumentChunker。

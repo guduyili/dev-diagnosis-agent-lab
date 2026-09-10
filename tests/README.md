@@ -1,21 +1,22 @@
 # 测试入口
 
-tests/daily 已按学习日程重写，直接导入 references/upstream/agentic-rag-for-dummies/project 的真实模块。
-59 项离线检查覆盖 18 个学习时段；6 个时段另需人工证据。用法、来源、测试替身与改进方向见 [每日指南](../docs/11-daily-tests.md)。
+tests/daily 按“一个自动学习日一个 test_dXX 文件”组织。18 个文件、59 项测试；另外 6 个学习时段用人工证据验收。
+
+当前文件内直接写上游 import、数据、对象创建、调用和断言。模型响应和 embedding 替身也完整放在当天文件，不再通过 support.py 或业务 fixture 隐藏执行过程。
 
 ~~~powershell
 Set-Location 'G:\Learning\dev-diagnosis-agent-lab'
-uv sync --frozen
 $env:PYTHONUTF8 = '1'
-.\.venv\Scripts\python.exe -m pytest tests/daily --day D06 -v
-.\.venv\Scripts\python.exe -m pytest tests/daily --through-day D12 -q
-.\scripts\check_day.ps1 -Day D06
+.\.venv\Scripts\python.exe -m pytest tests/daily/test_d05_chunking.py -v
+.\.venv\Scripts\python.exe -m pytest tests/daily --day D05 -v
+.\scripts\check_day.ps1 -Day D12 -Cumulative
 ~~~
 
-- daily：测试真实上游工作树，使用真实 LangGraph、本地 Qdrant、parent JSON；只在模型边界使用替身。
-- unit/integration：留给学习者独立实现的 src/diagnosis_agent 普通测试。
-- upstream：早期的 13 项烟雾测试，含运行时替身，作为历史材料保留；已退出默认收集，优先使用新版 daily，勿在同一进程混跑。
-- evals：今后显式运行真实模型质量评测，当前 daily 不调用 DeepEval。
+新环境先执行 uv sync --frozen。详细日程、可修改方向和测试辅助工具解释见 [每日指南](../docs/11-daily-tests.md)。
 
-旧版 daily 与指南已备份到 notes/archive/daily-before-upstream-20260909/，不参与 pytest 收集。
-日程通过不代表独立实现或真实模型效果通过；主项目 src 中的练习代码继续由学习者完善。
+- daily：直接调用本地 agentic-rag-for-dummies/project，实际执行 LangGraph、本地 Qdrant 与 parent JSON。
+- unit/integration：留给自己实现的 src/diagnosis_agent。
+- upstream：早期烟雾测试作为历史材料保留，已退出默认收集；不要与 daily 同进程混跑。
+- evals：今后显式运行真实模型质量评测；daily 不调用在线裁判。
+
+前一版 weekly 文件、support 与数据已备份至 notes/archive/daily-fixtures-20260910/。业务源码由学习者继续完善。

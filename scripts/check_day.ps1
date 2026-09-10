@@ -14,7 +14,7 @@ if (-not (Test-Path -LiteralPath $taskPython)) {
 $taskReportDir = Join-Path $taskRoot 'reports\raw'
 New-Item -ItemType Directory -Path $taskReportDir -Force | Out-Null
 $taskStamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
-$taskReport = Join-Path $taskReportDir "daily-upstream-$Day-$taskStamp.xml"
+$taskReport = Join-Path $taskReportDir "daily-direct-$Day-$taskStamp.xml"
 $taskSelector = if ($Cumulative) { '--through-day' } else { '--day' }
 $taskOldUtf8 = $env:PYTHONUTF8
 $taskExitCode = 1
