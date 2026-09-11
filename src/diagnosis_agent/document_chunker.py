@@ -80,7 +80,7 @@ class DocumentChunker:
         
 
 
-    def create_chunks_single(self, md_path, source_name=None):
+    def create_chunks_single(self, md_path, source_name):
         """处理单个文件，返回 ``[(parent_id, parent), ...]`` 与 child 列表。
 
         parent_id 在最后一步按文件 stem 和顺序生成；这使同一输入和配置下的

@@ -73,22 +73,29 @@ class DocumentManager:
                     pdfs_to_markdowns(str(source_path), overwrite=False)
                 parent_chunks,child_chunks = self.rag_system.chunker.create_chunks_single(
                     md_path,
-                    source_path=source_path.name,
+                    source_name=source_path.name,
                 )
+
+
                 if not child_chunks:
                     raise ValueError("No child chunks were created.")
 
-                parent_id = [parent_id for parent_id, _ in parent_chunks]
-                collection = self.rag_system.vector_db_manager.get_collection(self.rag_system.collection_name)
+                parent_ids = [parent_id for parent_id, _ in parent_chunks]
+                self.rag_system.parent_store.save_many(parent_chunks)
+                
+                collection = self.rag_system.vector_db.get_collection(self.rag_system.collection_name)
                 # 此调用同时计算 child 向量写入库, 不是仅把文本登记到待处理队列
                 collection.add_documents(child_chunks)
+
+                print(f"✓ Imported {len(parent_chunks)} parent chunks and {len(child_chunks)} child chunks from {source_path.name}")
+                # print(f" Collection '{self.rag_system.collection_name}' now has {collection.count()} child vectors.")
 
                 added += 1 
 
             except Exception as e:
                 # 补偿清理，不是事务回滚 没有清理可能已部分写入的child向量
                 # delete_many/unlink 若再次抛错 会向外传播， 后面的文件也不会继续
-                self.rag_system.parent_store.delete_many(parent_id)
+                self.rag_system.parent_store.delete_many(parent_ids)
                 if md_path.exists():
                     md_path.unlink()
                 print(f"Error processing {doc_path}: {e}")
@@ -98,4 +105,22 @@ class DocumentManager:
         return added, skipped
             
 
-            
+    def get_markdown_files(self):
+        # 优先使用 parent 来源标签；只要非空，就不再合并 Markdown 目录中的文件。
+        # 两种展示来源都不能证明 child 索引完整，仅用于 UI 文件列表。
+        sources = self.rag_system.parent_store.list_sources()
+
+        if sources:
+            return sources
+        return sorted(p.name for p in self.markdown_dir.glob("*.md"))
+
+    def clear_all(self):
+        """删除当前 collection、Markdown 和 parent 文件，再创建空 collection。"""
+        # 顺序操作、非原子操作；中间失败可能留下部分已删除的数据，没有自动恢复。
+        self.markdown_dir.mkdir(parents=True, exist_ok=True)
+        self.rag_system.vector_db.delete_collection(self.rag_system.collection_name)
+
+        clear_directory_contents(self.markdown_dir)
+        self.rag_system.parent_store.clear_store()
+
+        self.rag_system.vector_db.create_collection(self.rag_system.collection_name)

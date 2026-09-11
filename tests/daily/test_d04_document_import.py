@@ -99,6 +99,9 @@ def test_markdown_import_records_actual_sources_and_parents(tmp_path, monkeypatc
         # 3. 实际调用；三份文件都应成功导入。
         assert manager.add_documents(paths) == (3, 0)
         assert manager.get_markdown_files() == ["deepseek.md", "parents.md", "sessions.md"]
+
+        listed_sources = parent_store.list_sources()
+        print("\nListed sources:", listed_sources)
         stored = parent_store.load_content("deepseek_p0")
         assert stored["metadata"]["source"] == "deepseek.md"
         assert "This response_format type is unavailable now" in stored["content"]

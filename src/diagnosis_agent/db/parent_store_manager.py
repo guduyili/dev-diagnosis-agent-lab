@@ -49,9 +49,18 @@ class ParentStoreManager:
         # 兼容传入带 .json 的名称。不返回 None：缺失抛 FileNotFoundError，
         # 格式损坏抛 JSONDecodeError；工具层决定如何把异常转成模型可读结果。
         file_path = self.__store_path /(
-            parent_id if parent_id.lower().endwith(".json") else f"{parent_id}.json"
+            parent_id if parent_id.lower().endswith(".json") else f"{parent_id}.json"
         )
         return json.loads(file_path.read_text(encoding="utf-8"))
+
+    def load_content(self, parent_id: str) -> Dict:
+        # 对工具层做字段适配；parent_id 取本次请求值，不从 JSON 推断。
+        data = self.load(parent_id)
+        return {
+                "content": data["page_content"],
+                "parent_id": parent_id,
+                "metadata": data["metadata"]
+            }
 
 
     @staticmethod

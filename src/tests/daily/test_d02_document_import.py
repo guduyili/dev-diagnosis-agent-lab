@@ -69,3 +69,118 @@ DOCUMENTS = {
         "Gradio 当前共享一个 RAGSystem，不能因此声称页面已自动隔离不同用户。\n"
     ),
 }
+
+
+
+def test_markdown_import_records_actual_sources_and_parents(tmp_path, monkeypatch):
+    # 1. 当天资料在本文件 DOCUMENTS 中；写入本次测试的上传目录。
+    upload_dir = tmp_path / "uploads"
+
+    upload_dir.mkdir()
+    paths = []
+    for name, text in DOCUMENTS.items():
+        path = upload_dir / name
+        path.write_text(text,encoding="utf-8")
+        paths.append(str(path))
+    print("\nPaths:", paths)
+    markdown_dir = tmp_path / "markdown"
+    monkeypatch.setattr(config, "MARKDOWN_DIR", str(markdown_dir))
+    monkeypatch.setattr(config, "QDRANT_DB_PATH", str(tmp_path / "qdrant"))
+    monkeypatch.setattr(config, "MIN_PARENT_SIZE", 80)
+    monkeypatch.setattr(config, "MAX_PARENT_SIZE", 420)
+    monkeypatch.setattr(config, "CHILD_CHUNK_SIZE", 160)
+    monkeypatch.setattr(config, "CHILD_CHUNK_OVERLAP", 20)
+    monkeypatch.setattr(vector_module, "HuggingFaceEmbeddings", lambda **kw: LocalDenseEmbeddings())
+    monkeypatch.setattr(vector_module, "FastEmbedSparse", lambda **kw: LocalSparseEmbeddings())
+
+    # 2. 逐个创建真实组件，再交给上游 DocumentManager。
+
+    chunker = DocumentChunker()
+    parent_store = ParentStoreManager(markdown_dir/"parents")
+    vector_db = VectorDbManager()
+
+    try:
+        vector_db.create_collection(config.CHILD_COLLECTION)
+        #
+        components = SimpleNamespace(chunker=chunker, parent_store=parent_store,
+                                     vector_db=vector_db, collection_name=config.CHILD_COLLECTION)  
+
+        manager = DocumentManager(components)
+
+        # 3.实际调用 三分文件都应成功导入
+        assert manager.add_documents(paths) == (3,0)
+        assert manager.get_markdown_files() == ["deepseek.md", "parents.md", "sessions.md"]
+
+        listed_sources = parent_store.list_sources()
+        print("\nListed sources:", listed_sources)
+
+        stored = parent_store.load_content("deepseek_p0")
+        print("\nStored parent content:", stored)
+        assert stored["metadata"]["source"] == "deepseek.md"
+        assert "This response_format type is unavailable now" in stored["content"]
+        assert (markdown_dir / "deepseek.md").read_text(encoding="utf-8") == DOCUMENTS["deepseek.md"]
+
+        result = vector_db.get_collection(config.CHILD_COLLECTION).similarity_search("response_format", k=1)
+        assert result[0].metadata["source"] == "deepseek.md"
+        print("\nSimilarity search result:", result)
+    finally:
+        vector_db._VectorDbManager__client.close()
+
+
+
+@pytest.mark.current_behavior
+def test_reimport_skips_existing_filename_even_if_content_changed(tmp_path, monkeypatch):
+    # 同一文件更新内容后再次导入，上游仍按名称跳过。
+    path = tmp_path / "deepseek.md"
+    path.write_text(DOCUMENTS["deepseek.md"], encoding="utf-8")
+    monkeypatch.setattr(config, "MARKDOWN_DIR", str(tmp_path / "markdown"))
+    monkeypatch.setattr(config, "QDRANT_DB_PATH", str(tmp_path / "qdrant"))
+    monkeypatch.setattr(config, "MIN_PARENT_SIZE", 80)
+    monkeypatch.setattr(config, "MAX_PARENT_SIZE", 420)
+    monkeypatch.setattr(config, "CHILD_CHUNK_SIZE", 160)
+    monkeypatch.setattr(config, "CHILD_CHUNK_OVERLAP", 20)
+    monkeypatch.setattr(vector_module, "HuggingFaceEmbeddings", lambda **kw: LocalDenseEmbeddings())
+    monkeypatch.setattr(vector_module, "FastEmbedSparse", lambda **kw: LocalSparseEmbeddings())
+    parent_store = ParentStoreManager(tmp_path / "parents")
+    vector_db = VectorDbManager()
+    try:
+        vector_db.create_collection(config.CHILD_COLLECTION)
+        manager = DocumentManager(SimpleNamespace(
+            chunker=DocumentChunker(), parent_store=parent_store, vector_db=vector_db,
+            collection_name=config.CHILD_COLLECTION,
+        ))
+        assert manager.add_documents([str(path)]) == (1, 0)
+
+        path.write_text("# 新版本\n更新后内容", encoding="utf-8")
+        assert manager.add_documents([str(path)]) == (0, 1)
+        assert "更新后内容" not in parent_store.load_content("deepseek_p0")["content"]
+    finally:
+        vector_db._VectorDbManager__client.close()
+
+def test_failed_empty_import_removes_generated_markdown(tmp_path, monkeypatch):
+    path = tmp_path / "blank.md"
+    path.write_text("", encoding="utf-8")
+    markdown_dir = tmp_path / "markdown"
+    parent_dir = tmp_path / "parents"
+    monkeypatch.setattr(config, "MARKDOWN_DIR", str(markdown_dir))
+    monkeypatch.setattr(config, "QDRANT_DB_PATH", str(tmp_path / "qdrant"))
+    monkeypatch.setattr(config, "MIN_PARENT_SIZE", 80)
+    monkeypatch.setattr(config, "MAX_PARENT_SIZE", 420)
+    monkeypatch.setattr(config, "CHILD_CHUNK_SIZE", 160)
+    monkeypatch.setattr(config, "CHILD_CHUNK_OVERLAP", 20)
+    monkeypatch.setattr(vector_module, "HuggingFaceEmbeddings", lambda **kw: LocalDenseEmbeddings())
+    monkeypatch.setattr(vector_module, "FastEmbedSparse", lambda **kw: LocalSparseEmbeddings())
+    parent_store = ParentStoreManager(parent_dir)
+    vector_db = VectorDbManager()
+    try:
+        vector_db.create_collection(config.CHILD_COLLECTION)
+        manager = DocumentManager(SimpleNamespace(
+            chunker=DocumentChunker(), parent_store=parent_store, vector_db=vector_db,
+            collection_name=config.CHILD_COLLECTION,
+        ))
+
+        assert manager.add_documents([str(path)]) == (0, 1)
+        assert not (markdown_dir / "blank.md").exists()
+        assert not (parent_dir / "blank_p0.json").exists()
+    finally:
+        vector_db._VectorDbManager__client.close()
